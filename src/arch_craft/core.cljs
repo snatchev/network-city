@@ -7,8 +7,6 @@
 
 (println "Edits to this text should show up in your developer console.")
 
-(defonce app-state (atom {:text "Hello world!"}))
-
 (def app-element (.getElementById js/document "app"))
 (def aspect (/ (.-innerWidth js/window) (.-innerHeight js/window)))
 (def camera-distance 50)
@@ -34,15 +32,28 @@
 (def material (THREE.MeshNormalMaterial.))
 (def mesh (THREE.Mesh. geometry material))
 
-(defn new-space [] (THREE.Mesh.
+(defn new-space [row col] (THREE.Mesh.
   (THREE.PlaneGeometry. 10 10 1 1)
   (THREE.MeshBasicMaterial. (js-obj "wireframe" false "transparent" true "opacity" 0.5))))
 
-; rotate grid to be flat
-;(def grid (THREE.Group.))
-(def grid (THREE.Mesh.
-  (THREE.PlaneGeometry. 100 100 10 10)
+(defn grid-space [] (THREE.Mesh.
+  (THREE.PlaneGeometry. 10 10 1 1)
   (THREE.MeshBasicMaterial. (js-obj "wireframe" false "transparent" true "opacity" 0.5))))
+
+(defn grid-space-move! [grid-item row col]
+  (let [offset-x (* row 10) offset-y (* col 10)]
+    (do
+      (set! (.. grid-item -position -x) (+ (.. grid-item -position -x) offset-x))
+      (set! (.. grid-item -position -y) (+ (.. grid-item -position -y) offset-y))
+      grid-item)))
+
+;(def grid (grid-space))
+(def grid (THREE.Group.))
+
+(doseq [row (range 10) col (range 10)]
+  (.add grid (grid-space-move! (grid-space) row col)))
+
+(defonce app-state (atom {:text "Hello world!"}))
 
 (set! (.. grid -rotation -x) -1.57)
 (set! (.. grid -rotation -y) -1.57)
@@ -68,10 +79,11 @@
   (set! (.-y mouse)
     (+ (* (/ (.-clientY event) (.-innerHeight js/window)) -2) 1))
   (.setFromCamera raycaster mouse camera)
-  (let [intersection (nth (.intersectObjects raycaster (.-children scene)) 0)]
+  (let [intersection (nth (.intersectObjects raycaster (.-children grid)) 0)]
     (println intersection)
-    (let [face (.-face intersection)]
-      (.set (.-color face) (THREE.Color. 0xf2b640)))))
+    (.set (.. intersection -object -material -color) (THREE.Color. 0xf2b640))))
+    ;(let [face (.-face intersection)]
+    ;  (.set (.-color face) (THREE.Color. 0xf2b640)))))
 
 (defn render []
   ;(set! (.-y (.-rotation scene)) (+ (.-y (.-rotation scene)) 0.0005))
