@@ -28,17 +28,12 @@
 (.setSize renderer (.-innerWidth js/window) (.-innerHeight js/window))
 
 (.set (.-position camera) 100 100 100)  ;all three must be equal
-(def geometry (THREE.BoxGeometry. 10 10 10))
-(def material (THREE.MeshNormalMaterial.))
-(def mesh (THREE.Mesh. geometry material))
+(def mesh (THREE.Mesh. (THREE.BoxGeometry. 10 10 10)  (THREE.MeshNormalMaterial.)))
 
-(defn new-space [row col] (THREE.Mesh.
-  (THREE.PlaneGeometry. 10 10 1 1)
-  (THREE.MeshBasicMaterial. (js-obj "wireframe" false "transparent" true "opacity" 0.5))))
+(def default-grid-material (THREE.MeshBasicMaterial. (js-obj "wireframe" true "transparent" true "opacity" 0.5)))
+(def active-grid-material (THREE.MeshBasicMaterial. (js-obj "wireframe" false "transparent" true "opacity" 0.5)))
 
-(defn grid-space [] (THREE.Mesh.
-  (THREE.PlaneGeometry. 10 10 1 1)
-  (THREE.MeshBasicMaterial. (js-obj "wireframe" false "transparent" true "opacity" 0.5))))
+(defn grid-space [] (THREE.Mesh. (THREE.PlaneGeometry. 10 10 1 1) default-grid-material))
 
 (defn grid-space-move! [grid-item row col]
   (let [offset-x (* row 10) offset-y (* col 10)]
@@ -47,10 +42,9 @@
       (set! (.. grid-item -position -y) (+ (.. grid-item -position -y) offset-y))
       grid-item)))
 
-;(def grid (grid-space))
 (def grid (THREE.Group.))
 
-(doseq [row (range 10) col (range 10)]
+(doseq [row (range -5 5) col (range -5 5)]
   (.add grid (grid-space-move! (grid-space) row col)))
 
 (defonce app-state (atom {:text "Hello world!"}))
@@ -58,10 +52,6 @@
 (set! (.. grid -rotation -x) -1.57)
 (set! (.. grid -rotation -y) -1.57)
 (set! (.. grid -rotation -order) "YXZ")
-;(for [row (range 10) col (range 10)]
-;  (let [grid-item (new-space)]
-;    (set! (.. grid-item -position -x) (+ (.. grid-item -position -x) row))
-;    (set! (.. grid-item -position -y) (+ (.. grid-item -position -y) col)))))
 
 (.add scene mesh)
 (.add scene (THREE.AmbientLight. 0x444444))
@@ -72,22 +62,30 @@
 
 (.lookAt camera (.-position scene))
 
+;we are changing the global ref `mouse` for performance?
+(defn mouse->camera [x y]
+  (set! (.-x mouse)
+    (- (* (/ x (.-innerWidth js/window)) 2) 1))
+  (set! (.-y mouse)
+    (+ (* (/ y (.-innerHeight js/window)) -2) 1)))
+
+(defn reset-grid-state! []
+  (let [grid-items (.-children grid)]
+    (doseq [grid-item (js->clj grid-items)]
+      (set! (.-material grid-item) default-grid-material))))
+
 (defn on-mousemove [event]
   (.preventDefault event)
-  (set! (.-x mouse)
-    (- (* (/ (.-clientX event) (.-innerWidth js/window)) 2) 1))
-  (set! (.-y mouse)
-    (+ (* (/ (.-clientY event) (.-innerHeight js/window)) -2) 1))
+  (mouse->camera (.-clientX event) (.-clientY event))
   (.setFromCamera raycaster mouse camera)
-  (let [intersection (nth (.intersectObjects raycaster (.-children grid)) 0)]
-    (println intersection)
-    (.set (.. intersection -object -material -color) (THREE.Color. 0xf2b640))))
-    ;(let [face (.-face intersection)]
-    ;  (.set (.-color face) (THREE.Color. 0xf2b640)))))
+
+  (reset-grid-state! )
+  ;check if we are intersecting any grid items?
+  (if-let [intersection (nth (.intersectObjects raycaster (.-children grid)) 0)]
+    (set! (.. intersection -object -material) active-grid-material)
+    ()))
 
 (defn render []
-  ;(set! (.-y (.-rotation scene)) (+ (.-y (.-rotation scene)) 0.0005))
-  ;(.setFromCamera raycaster mouse camera)
   (.render renderer scene camera))
 
 (defn animate []
