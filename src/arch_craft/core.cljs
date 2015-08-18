@@ -5,8 +5,6 @@
 
 (enable-console-print!)
 
-(println "Edits to this text should show up in your developer console.")
-
 (def app-element (.getElementById js/document "app"))
 (def aspect (/ (.-innerWidth js/window) (.-innerHeight js/window)))
 (def camera-distance 50)
@@ -22,6 +20,7 @@
 (def scene (THREE.Scene.))
 (def raycaster (THREE.Raycaster.))
 (def mouse (THREE.Vector2.))
+(def scroll-pos (THREE.Vector2.))
 
 (def renderer (THREE.WebGLRenderer. (js-obj "antialias" false)))
 (.setPixelRatio renderer (.-devicePixelRatio js/window))
@@ -29,70 +28,90 @@
 
 (.set (.-position camera) 100 100 100)  ;all three must be equal
 (def mesh (THREE.Mesh. (THREE.BoxGeometry. 10 10 10)  (THREE.MeshNormalMaterial.)))
+;move it up so that it stays on the baseline
+(.applyMatrix mesh (.makeTranslation (THREE.Matrix4.) 0 10 0))
 
 (def default-grid-material (THREE.MeshBasicMaterial. (js-obj "wireframe" true "transparent" true "opacity" 0.5)))
 (def active-grid-material (THREE.MeshBasicMaterial. (js-obj "wireframe" false "transparent" true "opacity" 0.5)))
 
-(defn grid-space [] (THREE.Mesh. (THREE.PlaneGeometry. 10 10 1 1) default-grid-material))
+(def grid (THREE.Geometry.))
 
-(defn grid-space-move! [grid-item row col]
-  (let [offset-x (* row 10) offset-y (* col 10)]
-    (do
-      (set! (.. grid-item -position -x) (+ (.. grid-item -position -x) offset-x))
-      (set! (.. grid-item -position -y) (+ (.. grid-item -position -y) offset-y))
-      grid-item)))
+(let [size 100 step 10 vert (.-vertices grid)]
+  (doseq [idx (range (- size) size step)]
+    (.push vert (THREE.Vector3. (- size) 0 idx))
+    (.push vert (THREE.Vector3. size 0 idx))
+    (.push vert (THREE.Vector3. idx 0 (- size)))
+    (.push vert (THREE.Vector3. idx 0 size))))
 
-(def grid (THREE.Group.))
+(.add scene
+  (THREE.Line. grid
+              (THREE.LineBasicMaterial. (js-obj "transparent" true "color" 0xFFFFFF))
+               THREE.LinePieces))
 
-(doseq [row (range -5 5) col (range -5 5)]
-  (.add grid (grid-space-move! (grid-space) row col)))
+(def planebuffer (THREE.PlaneBufferGeometry. 1000 1000))
+(aset planebuffer "visible" false)
+(.applyMatrix planebuffer (.makeRotationX (THREE.Matrix4.) -1.57079633))
+(.add scene (THREE.Mesh. planebuffer))
 
-(defonce app-state (atom {:text "Hello world!"}))
-
-(set! (.. grid -rotation -x) -1.57)
-(set! (.. grid -rotation -y) -1.57)
-(set! (.. grid -rotation -order) "YXZ")
+(defonce app-state (atom {:active-cursor nil, :scroll-pos scroll-pos, :objects (list)}))
 
 (.add scene mesh)
 (.add scene (THREE.AmbientLight. 0x444444))
-(.add scene (THREE.AxisHelper. 40))
-(.add scene grid)
+;(.add scene (THREE.AxisHelper. 40))
 
 (.appendChild app-element (.-domElement renderer))
 
-(.lookAt camera (.-position scene))
+(set! scroll-pos (.-position scene))
+(.lookAt camera scroll-pos)
 
 ;we are changing the global ref `mouse` for performance?
 (defn mouse->camera [x y]
-  (set! (.-x mouse)
+  (aset mouse "x"
     (- (* (/ x (.-innerWidth js/window)) 2) 1))
-  (set! (.-y mouse)
+  (aset mouse "y"
     (+ (* (/ y (.-innerHeight js/window)) -2) 1)))
+
+(defn snap-to-grid [mesh])
 
 (defn reset-grid-state! []
   (let [grid-items (.-children grid)]
     (doseq [grid-item (js->clj grid-items)]
-      (set! (.-material grid-item) default-grid-material))))
+      (aset grid-item "material" default-grid-material))))
+
+(defn on-windowresize [event]
+  (let [width (.-innerWidth js/window) height (.-innerHeight js/window)]
+    (aset camera "aspect" (/ width height))
+    (.updateProjectionMatrix camera)
+    (.setSize renderer width height)))
 
 (defn on-mousemove [event]
   (.preventDefault event)
-  (mouse->camera (.-clientX event) (.-clientY event))
-  (.setFromCamera raycaster mouse camera)
+  (mouse->camera (.-clientX event) (.-clientY event)))
 
-  (reset-grid-state! )
-  ;check if we are intersecting any grid items?
-  (if-let [intersection (nth (.intersectObjects raycaster (.-children grid)) 0)]
-    (set! (.. intersection -object -material) active-grid-material)
-    ()))
+; look into window.WheelEvent API which is the standard
+(defn on-mousewheel [event]
+  (.preventDefault event)
+  (aset scroll-pos "x" (+ (/ event.wheelDeltaX 10.0) (.-x scroll-pos)))
+  (aset scroll-pos "y" (+ (/ event.wheelDeltaY 10.0) (.-y scroll-pos))))
+  ;(swap! app-state assoc :screen-pos (.-wheelDeltaX event))
 
 (defn render []
+  (.setFromCamera raycaster mouse camera)
+  ;(reset-grid-state!)
+
+  ;check if we are intersecting any grid items?
+  ;(if-let [intersection (nth (.intersectObjects raycaster (.-children scene)) 0)]
+  ;  (set! (.. intersection -object -material) active-grid-material)
+  ;  ())
   (.render renderer scene camera))
 
 (defn animate []
   (.requestAnimationFrame js/window animate)
   (render))
 
-(.addEventListener js/document "mousemove" on-mousemove)
+(.addEventListener js/document "mousemove" on-mousemove false)
+(.addEventListener js/document "mousewheel" on-mousewheel false)
+(.addEventListener js/document "resize" on-windowresize false)
 (animate)
 
 (defn on-js-reload []
