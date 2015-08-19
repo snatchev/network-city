@@ -20,6 +20,7 @@
 (def scene (THREE.Scene.))
 (def raycaster (THREE.Raycaster.))
 (def mouse (THREE.Vector2.))
+(def screen-coords (THREE.Vector2.))
 (def scroll-pos (THREE.Vector2.))
 
 (def renderer (THREE.WebGLRenderer. (js-obj "antialias" false)))
@@ -27,12 +28,18 @@
 (.setSize renderer (.-innerWidth js/window) (.-innerHeight js/window))
 
 (.set (.-position camera) 100 100 100)  ;all three must be equal
-(def mesh (THREE.Mesh. (THREE.BoxGeometry. 10 10 10)  (THREE.MeshNormalMaterial.)))
+(def mesh (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.)))
+(def cursor (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial. (js-obj "transparent" true "opacity" 0.5))))
+
+(defonce app-state (atom {:active-cursor nil, :scroll-pos scroll-pos, :objects (list)}))
+
+(defn add-object [object & {:keys [interactive]}]
+  (.add scene object)
+  (if interactive
+    (swap! app-state assoc :objects (conj (@app-state :objects) object))))
+
 ;move it up so that it stays on the baseline
 (.applyMatrix mesh (.makeTranslation (THREE.Matrix4.) 0 10 0))
-
-(def default-grid-material (THREE.MeshBasicMaterial. (js-obj "wireframe" true "transparent" true "opacity" 0.5)))
-(def active-grid-material (THREE.MeshBasicMaterial. (js-obj "wireframe" false "transparent" true "opacity" 0.5)))
 
 (def grid (THREE.Geometry.))
 
@@ -51,12 +58,12 @@
 (def planebuffer (THREE.PlaneBufferGeometry. 1000 1000))
 (aset planebuffer "visible" false)
 (.applyMatrix planebuffer (.makeRotationX (THREE.Matrix4.) -1.57079633))
-(.add scene (THREE.Mesh. planebuffer))
 
-(defonce app-state (atom {:active-cursor nil, :scroll-pos scroll-pos, :objects (list)}))
 
-(.add scene mesh)
-(.add scene (THREE.AmbientLight. 0x444444))
+(add-object (THREE.Mesh. planebuffer) :interactive true)
+(add-object mesh :interactive true)
+(add-object cursor)
+(add-object (THREE.AmbientLight. 0x444444))
 ;(.add scene (THREE.AxisHelper. 40))
 
 (.appendChild app-element (.-domElement renderer))
@@ -64,19 +71,24 @@
 (set! scroll-pos (.-position scene))
 (.lookAt camera scroll-pos)
 
-;we are changing the global ref `mouse` for performance?
-(defn mouse->camera [x y]
-  (aset mouse "x"
-    (- (* (/ x (.-innerWidth js/window)) 2) 1))
-  (aset mouse "y"
-    (+ (* (/ y (.-innerHeight js/window)) -2) 1)))
+(defn snap-to-grid [mesh intersection]
+  (.log js/console intersection)
+  (if (.-face intersection) ;only snap to things that have faces.
+    (-> (.-position mesh)
+        (.copy (.-point intersection))
+        (.add (.. intersection -face -normal))
+        (.divideScalar 10)
+        (.floor)
+        (.multiplyScalar 10)
+        (.addScalar 5))))
 
-(defn snap-to-grid [mesh])
+(defn intersect-has-face? [intersection]
+  (not= (.-face intersection) nil))
 
-(defn reset-grid-state! []
-  (let [grid-items (.-children grid)]
-    (doseq [grid-item (js->clj grid-items)]
-      (aset grid-item "material" default-grid-material))))
+; (defn reset-grid-state! []
+;   (let [grid-items (.-children grid)]
+;     (doseq [grid-item (js->clj grid-items)]
+;       (aset grid-item "material" default-grid-material))))
 
 (defn on-windowresize [event]
   (let [width (.-innerWidth js/window) height (.-innerHeight js/window)]
@@ -86,7 +98,17 @@
 
 (defn on-mousemove [event]
   (.preventDefault event)
-  (mouse->camera (.-clientX event) (.-clientY event)))
+  (aset mouse "x"
+    (- (* (/ (.-clientX event) (.-innerWidth js/window)) 2) 1))
+  (aset mouse "y"
+    (+ (* (/ (.-clientY event) (.-innerHeight js/window)) -2) 1))
+  (.setFromCamera raycaster mouse camera)
+  (println (@app-state :objects))
+  (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
+    (if-not (empty? intersections)
+      (snap-to-grid cursor (first intersections)))))
+
+  ;(snap-to-grid cursor mouse)
 
 ; look into window.WheelEvent API which is the standard
 (defn on-mousewheel [event]
@@ -96,17 +118,12 @@
   ;(swap! app-state assoc :screen-pos (.-wheelDeltaX event))
 
 (defn render []
-  (.setFromCamera raycaster mouse camera)
-  ;(reset-grid-state!)
-
-  ;check if we are intersecting any grid items?
-  ;(if-let [intersection (nth (.intersectObjects raycaster (.-children scene)) 0)]
-  ;  (set! (.. intersection -object -material) active-grid-material)
-  ;  ())
   (.render renderer scene camera))
 
 (defn animate []
-  (.requestAnimationFrame js/window animate)
+  ;limit FPS:
+  (.setTimeout js/window #(.requestAnimationFrame js/window animate) (/ 1000 30))
+  ;(.requestAnimationFrame js/window animate)
   (render))
 
 (.addEventListener js/document "mousemove" on-mousemove false)
