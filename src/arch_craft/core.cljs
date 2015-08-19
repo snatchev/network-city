@@ -20,7 +20,6 @@
 (def scene (THREE.Scene.))
 (def raycaster (THREE.Raycaster.))
 (def mouse (THREE.Vector2.))
-(def screen-coords (THREE.Vector2.))
 (def scroll-pos (THREE.Vector2.))
 
 (def renderer (THREE.WebGLRenderer. (js-obj "antialias" false)))
@@ -50,15 +49,13 @@
     (.push vert (THREE.Vector3. idx 0 (- size)))
     (.push vert (THREE.Vector3. idx 0 size))))
 
-(.add scene
-  (THREE.Line. grid
+(add-object (THREE.Line. grid
               (THREE.LineBasicMaterial. (js-obj "transparent" true "color" 0xFFFFFF))
                THREE.LinePieces))
 
 (def planebuffer (THREE.PlaneBufferGeometry. 1000 1000))
 (aset planebuffer "visible" false)
 (.applyMatrix planebuffer (.makeRotationX (THREE.Matrix4.) -1.57079633))
-
 
 (add-object (THREE.Mesh. planebuffer) :interactive true)
 (add-object mesh :interactive true)
@@ -72,7 +69,6 @@
 (.lookAt camera scroll-pos)
 
 (defn snap-to-grid [mesh intersection]
-  (.log js/console intersection)
   (if (.-face intersection) ;only snap to things that have faces.
     (-> (.-position mesh)
         (.copy (.-point intersection))
@@ -82,14 +78,6 @@
         (.multiplyScalar 10)
         (.addScalar 5))))
 
-(defn intersect-has-face? [intersection]
-  (not= (.-face intersection) nil))
-
-; (defn reset-grid-state! []
-;   (let [grid-items (.-children grid)]
-;     (doseq [grid-item (js->clj grid-items)]
-;       (aset grid-item "material" default-grid-material))))
-
 (defn on-windowresize [event]
   (let [width (.-innerWidth js/window) height (.-innerHeight js/window)]
     (aset camera "aspect" (/ width height))
@@ -98,17 +86,19 @@
 
 (defn on-mousemove [event]
   (.preventDefault event)
-  (aset mouse "x"
-    (- (* (/ (.-clientX event) (.-innerWidth js/window)) 2) 1))
-  (aset mouse "y"
-    (+ (* (/ (.-clientY event) (.-innerHeight js/window)) -2) 1))
+  (aset mouse "x" (-> (.-clientX event)
+                      (/ (.-innerWidth js/window))
+                      (* 2)
+                      (- 1)))
+  (aset mouse "y" (-> (.-clientY event)
+                      (/ (.-innerHeight js/window))
+                      (* -2)
+                      (+ 1)))
+    ;(+ (* (/ (.-clientY event) (.-innerHeight js/window)) -2) 1))
   (.setFromCamera raycaster mouse camera)
-  (println (@app-state :objects))
   (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
     (if-not (empty? intersections)
       (snap-to-grid cursor (first intersections)))))
-
-  ;(snap-to-grid cursor mouse)
 
 ; look into window.WheelEvent API which is the standard
 (defn on-mousewheel [event]
