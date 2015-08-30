@@ -18,6 +18,7 @@
     1000))
 
 (def scene (THREE.Scene.))
+(.add scene camera)
 (def raycaster (THREE.Raycaster.))
 (def mouse (THREE.Vector2.))
 (def scroll-pos (THREE.Vector2.))
@@ -27,18 +28,19 @@
 (.setSize renderer (.-innerWidth js/window) (.-innerHeight js/window))
 
 (.set (.-position camera) 100 100 100)  ;all three must be equal
-(def mesh (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.)))
 (def cursor (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial. (js-obj "transparent" true "opacity" 0.5))))
 
-(defonce app-state (atom {:active-cursor nil, :scroll-pos scroll-pos, :objects (list)}))
+(defonce app-state (atom {
+  :active-tool 'insert-model,
+  :active-cursor nil,
+  :scroll-pos scroll-pos,
+  :objects (list),
+  }))
 
 (defn add-object [object & {:keys [interactive]}]
   (.add scene object)
   (if interactive
     (swap! app-state assoc :objects (conj (@app-state :objects) object))))
-
-;move it up so that it stays on the baseline
-(.applyMatrix mesh (.makeTranslation (THREE.Matrix4.) 0 10 0))
 
 (def grid (THREE.Geometry.))
 
@@ -59,13 +61,12 @@
 
 (add-object (THREE.Mesh. planebuffer (THREE.MeshBasicMaterial. (js-obj "color" 0x333333))) :interactive true)
 (add-object cursor)
-(add-object mesh :interactive false)
 (add-object (THREE.AmbientLight. 0x444444))
 ;(.add scene (THREE.AxisHelper. 40))
 
 (.appendChild app-element (.-domElement renderer))
 
-(set! scroll-pos (.-position scene))
+(set! scroll-pos (THREE.Vector3. 0 0 0))
 (.lookAt camera scroll-pos)
 
 (defn snap-to-grid [mesh intersection]
@@ -78,12 +79,9 @@
         (.multiplyScalar 10)
         (.addScalar 5))))
 
-; Event Handling
-(defn on-windowresize [event]
-  (let [width (.-innerWidth js/window) height (.-innerHeight js/window)]
-    (aset camera "aspect" (/ width height))
-    (.updateProjectionMatrix camera)
-    (.setSize renderer width height)))
+;conversion functions
+(defn deg->rad [deg]
+  (* deg (/ js/Math.PI 180.0)))
 
 (defn screen->space [vector x y]
   (aset vector "x" (-> x
@@ -94,6 +92,46 @@
                       (/ (.-innerHeight js/window))
                       (* -2)
                       (+ 1))))
+; Actions
+(defn insert-model [model]
+  (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
+    (if-not (empty? intersections)
+      (let [model (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.))]
+        (add-object model)
+        (snap-to-grid model (first intersections))))))
+
+; Camera movement
+(defn rotate-camera [camera deg]
+  (aset camera "rotation" "y" (deg->rad deg)))
+
+(defn rotate-camera-cw []
+  (rotate-camera camera 90))
+(defn rotate-camera-ccw []
+  (rotate-camera camera -90))
+
+(def pan-camera-damper 0.1)
+(defn pan-camera-left [camera distance]
+  (let [te (.. camera -matrix -elements) offset (THREE.Vector3.)]
+    (.set offset (aget te 0) (aget te 1) (aget te 2))
+    (.multiplyScalar (.multiplyScalar offset (- distance)) pan-camera-damper)
+    (.add (.-position camera) offset)))
+
+(defn pan-camera-up [camera distance]
+  (let [te (.. camera -matrix -elements) offset (THREE.Vector3.)]
+    (.set offset (aget te 4) (aget te 5) (aget te 6))
+    (.multiplyScalar (.multiplyScalar offset distance) pan-camera-damper)
+    (.add (.-position camera) offset)))
+
+(defn pan-camera [delta-x delta-y] ;pan in pixel space
+  (pan-camera-left camera delta-x)
+  (pan-camera-up camera delta-y))
+
+; Event Handling
+(defn on-windowresize [event]
+  (let [width (.-innerWidth js/window) height (.-innerHeight js/window)]
+    (aset camera "aspect" (/ width height))
+    (.updateProjectionMatrix camera)
+    (.setSize renderer width height)))
 
 (defn on-mousemove [event]
   (.preventDefault event)
@@ -106,19 +144,24 @@
 ; look into window.WheelEvent API which is the standard
 (defn on-mousewheel [event]
   (.preventDefault event)
-  (aset scroll-pos "x" (+ (/ event.wheelDeltaX 10.0) (.-x scroll-pos)))
-  (aset scroll-pos "y" (+ (/ event.wheelDeltaY 10.0) (.-y scroll-pos))))
+  (let [vector (THREE.Vector3. (.-wheelDeltaX event) (.-wheelDeltaY event))]
+    (pan-camera (.-wheelDeltaX event) (.-wheelDeltaY event))))
+    ;(aset scroll-pos "x" (+ (/ event.wheelDeltaX 1) (.-x scroll-pos)))
+    ;(aset scroll-pos "y" (+ (/ event.wheelDeltaY 1) (.-y scroll-pos)))
 
 (defn on-click [event]
   (.preventDefault event)
   (let [click-coord (THREE.Vector2.)]
     (screen->space click-coord (.-clientX event) (.-clientY event))
     (.setFromCamera raycaster click-coord camera)
-    (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
-      (if-not (empty? intersections)
-        (let [model (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.))]
-          (add-object model)
-          (snap-to-grid model (first intersections)))))))
+    (insert-model (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.)))))
+
+(defn on-keyup [event]
+  (let [code (.-keyCode event)]
+    (case code
+      81 (rotate-camera-cw)  ;q
+      69 (rotate-camera-ccw) ;e
+      :default)))
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
@@ -129,11 +172,13 @@
   (.removeChild app-element (.item (.-children (.getElementById js/document "app")) 0))
   (.removeEventListener js/document "mousemove" on-mousemove)
   (.removeEventListener js/document "mousewheel" on-mousemove)
+  (.removeEventListener js/document "keyup" on-keyup)
   (.removeEventListener js/document "resize" on-mousemove))
 
 (.addEventListener js/document "click" on-click false)
 (.addEventListener js/document "mousemove" on-mousemove false)
 (.addEventListener js/document "mousewheel" on-mousewheel false)
+(.addEventListener js/document "keyup" on-keyup false)
 (.addEventListener js/document "resize" on-windowresize false)
 
 ; Rendering
