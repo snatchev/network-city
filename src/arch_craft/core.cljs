@@ -16,24 +16,27 @@
     (- camera-distance)
     1
     1000))
+(def camera-target (THREE.Object3D.))
 
 (def scene (THREE.Scene.))
-(.add scene camera)
+;(.add scene camera)
 (def raycaster (THREE.Raycaster.))
 (def mouse (THREE.Vector2.))
-(def scroll-pos (THREE.Vector2.))
 
 (def renderer (THREE.WebGLRenderer. (js-obj "antialias" false)))
 (.setPixelRatio renderer (.-devicePixelRatio js/window))
 (.setSize renderer (.-innerWidth js/window) (.-innerHeight js/window))
 
-(.set (.-position camera) 100 100 100)  ;all three must be equal
+(.set (.-position camera) 100 100 100)
+(.add camera-target camera)
+(.add camera-target (THREE.AxisHelper. 8))
+(.add scene camera-target)
+
 (def cursor (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial. (js-obj "transparent" true "opacity" 0.5))))
 
 (defonce app-state (atom {
   :active-tool 'insert-model,
   :active-cursor nil,
-  :scroll-pos scroll-pos,
   :objects (list),
   }))
 
@@ -66,8 +69,8 @@
 
 (.appendChild app-element (.-domElement renderer))
 
-(set! scroll-pos (THREE.Vector3. 0 0 0))
-(.lookAt camera scroll-pos)
+(.lookAt camera (THREE.Vector3. 0 0 0))
+;(.lookAt camera camera-target)
 
 (defn snap-to-grid [mesh intersection]
   (if (.-face intersection) ;only snap to things that have faces.
@@ -103,29 +106,19 @@
 ; Camera movement
 (defn rotate-camera [camera deg]
   (let [rotation (.-rotation camera)]
-    (aset rotation "x" (+ (deg->rad deg) (.-x rotation) ))))
-
+    (aset rotation "y" (+ (deg->rad deg) (.-y rotation) ))))
 (defn rotate-camera-cw []
-  (rotate-camera camera 10))
+  (rotate-camera camera-target 10))
 (defn rotate-camera-ccw []
-  (rotate-camera camera -10))
+  (rotate-camera camera-target -10))
 
 (def pan-camera-damper 0.1)
-(defn pan-camera-left [camera distance]
-  (let [te (.. camera -matrix -elements) offset (THREE.Vector3.)]
-    (.set offset (aget te 0) (aget te 1) (aget te 2))
-    (.multiplyScalar (.multiplyScalar offset (- distance)) pan-camera-damper)
-    (.add (.-position camera) offset)))
-
-(defn pan-camera-up [camera distance]
-  (let [te (.. camera -matrix -elements) offset (THREE.Vector3.)]
-    (.set offset (aget te 4) (aget te 5) (aget te 6))
-    (.multiplyScalar (.multiplyScalar offset distance) pan-camera-damper)
-    (.add (.-position camera) offset)))
-
 (defn pan-camera [delta-x delta-y] ;pan in pixel space
-  (pan-camera-left camera delta-x)
-  (pan-camera-up camera delta-y))
+  (let [position (.-position camera-target) offset (THREE.Vector3.) y-axis (THREE.Vector3. 0 1 0)]
+    (.add position (-> offset
+                       (.set delta-x 0 delta-y)
+                       (.multiplyScalar pan-camera-damper)
+                       (.applyAxisAngle y-axis (deg->rad 45))))))
 
 ; Event Handling
 (defn on-windowresize [event]
