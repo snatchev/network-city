@@ -102,12 +102,13 @@
 
 ; Camera movement
 (defn rotate-camera [camera deg]
-  (aset camera "rotation" "y" (deg->rad deg)))
+  (let [rotation (.-rotation camera)]
+    (aset rotation "x" (+ (deg->rad deg) (.-x rotation) ))))
 
 (defn rotate-camera-cw []
-  (rotate-camera camera 90))
+  (rotate-camera camera 10))
 (defn rotate-camera-ccw []
-  (rotate-camera camera -90))
+  (rotate-camera camera -10))
 
 (def pan-camera-damper 0.1)
 (defn pan-camera-left [camera distance]
@@ -144,10 +145,7 @@
 ; look into window.WheelEvent API which is the standard
 (defn on-mousewheel [event]
   (.preventDefault event)
-  (let [vector (THREE.Vector3. (.-wheelDeltaX event) (.-wheelDeltaY event))]
-    (pan-camera (.-wheelDeltaX event) (.-wheelDeltaY event))))
-    ;(aset scroll-pos "x" (+ (/ event.wheelDeltaX 1) (.-x scroll-pos)))
-    ;(aset scroll-pos "y" (+ (/ event.wheelDeltaY 1) (.-y scroll-pos)))
+  (pan-camera (.-wheelDeltaX event) (.-wheelDeltaY event)))
 
 (defn on-click [event]
   (.preventDefault event)
@@ -170,6 +168,7 @@
 
   ; this is a smell, make the setup idompotent
   (.removeChild app-element (.item (.-children (.getElementById js/document "app")) 0))
+  (.removeEventListener js/document "click" on-click)
   (.removeEventListener js/document "mousemove" on-mousemove)
   (.removeEventListener js/document "mousewheel" on-mousemove)
   (.removeEventListener js/document "keyup" on-keyup)
