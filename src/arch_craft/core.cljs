@@ -57,9 +57,9 @@
 (aset planebuffer "visible" false)
 (.applyMatrix planebuffer (.makeRotationX (THREE.Matrix4.) -1.57079633))
 
-(add-object (THREE.Mesh. planebuffer) :interactive true)
-(add-object mesh :interactive true)
+(add-object (THREE.Mesh. planebuffer (THREE.MeshBasicMaterial. (js-obj "color" 0x333333))) :interactive true)
 (add-object cursor)
+(add-object mesh :interactive false)
 (add-object (THREE.AmbientLight. 0x444444))
 ;(.add scene (THREE.AxisHelper. 40))
 
@@ -78,23 +78,26 @@
         (.multiplyScalar 10)
         (.addScalar 5))))
 
+; Event Handling
 (defn on-windowresize [event]
   (let [width (.-innerWidth js/window) height (.-innerHeight js/window)]
     (aset camera "aspect" (/ width height))
     (.updateProjectionMatrix camera)
     (.setSize renderer width height)))
 
-(defn on-mousemove [event]
-  (.preventDefault event)
-  (aset mouse "x" (-> (.-clientX event)
+(defn screen->space [vector x y]
+  (aset vector "x" (-> x
                       (/ (.-innerWidth js/window))
                       (* 2)
                       (- 1)))
-  (aset mouse "y" (-> (.-clientY event)
+  (aset vector "y" (-> y
                       (/ (.-innerHeight js/window))
                       (* -2)
-                      (+ 1)))
-    ;(+ (* (/ (.-clientY event) (.-innerHeight js/window)) -2) 1))
+                      (+ 1))))
+
+(defn on-mousemove [event]
+  (.preventDefault event)
+  (screen->space mouse (.-clientX event) (.-clientY event))
   (.setFromCamera raycaster mouse camera)
   (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
     (if-not (empty? intersections)
@@ -105,21 +108,17 @@
   (.preventDefault event)
   (aset scroll-pos "x" (+ (/ event.wheelDeltaX 10.0) (.-x scroll-pos)))
   (aset scroll-pos "y" (+ (/ event.wheelDeltaY 10.0) (.-y scroll-pos))))
-  ;(swap! app-state assoc :screen-pos (.-wheelDeltaX event))
 
-(defn render []
-  (.render renderer scene camera))
-
-(defn animate []
-  ;limit FPS:
-  (.setTimeout js/window #(.requestAnimationFrame js/window animate) (/ 1000 30))
-  ;(.requestAnimationFrame js/window animate)
-  (render))
-
-(.addEventListener js/document "mousemove" on-mousemove false)
-(.addEventListener js/document "mousewheel" on-mousewheel false)
-(.addEventListener js/document "resize" on-windowresize false)
-(animate)
+(defn on-click [event]
+  (.preventDefault event)
+  (let [click-coord (THREE.Vector2.)]
+    (screen->space click-coord (.-clientX event) (.-clientY event))
+    (.setFromCamera raycaster click-coord camera)
+    (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
+      (if-not (empty? intersections)
+        (let [model (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.))]
+          (add-object model)
+          (snap-to-grid model (first intersections)))))))
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
@@ -129,4 +128,22 @@
   ; this is a smell, make the setup idompotent
   (.removeChild app-element (.item (.-children (.getElementById js/document "app")) 0))
   (.removeEventListener js/document "mousemove" on-mousemove)
-)
+  (.removeEventListener js/document "mousewheel" on-mousemove)
+  (.removeEventListener js/document "resize" on-mousemove))
+
+(.addEventListener js/document "click" on-click false)
+(.addEventListener js/document "mousemove" on-mousemove false)
+(.addEventListener js/document "mousewheel" on-mousewheel false)
+(.addEventListener js/document "resize" on-windowresize false)
+
+; Rendering
+(defn render []
+  (.render renderer scene camera))
+
+(defn animate []
+  ;limit FPS:
+  (.setTimeout js/window #(.requestAnimationFrame js/window animate) (/ 1000 30))
+  ;(.requestAnimationFrame js/window animate)
+  (render))
+
+(animate)
