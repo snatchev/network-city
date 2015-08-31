@@ -2,6 +2,7 @@
     (:require))
 
 (def THREE js/THREE)
+(def TWEEN js/TWEEN)
 
 (enable-console-print!)
 
@@ -162,11 +163,20 @@
     (.setFromCamera raycaster click-coord (@camera :object))
     (insert-model (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.)))))
 
+(defn tween [func]
+  (-> (TWEEN.Tween. (js-obj "deg" 0))
+      (.to (js-obj "deg" 90) 500)
+      (.onUpdate (fn [_]
+        (this-as this
+          (func 5))))
+          ;(func (.-deg this)))))  ;I am certain there is a more elegant way to do this:
+      (.start)))
+
 (defn on-keyup [event]
   (let [code (.-keyCode event)]
     (case code
-      81 (rotate-camera-cw)  ;q
-      69 (rotate-camera-ccw) ;e
+      81 (tween rotate-camera-cw)  ;q
+      69 (tween rotate-camera-ccw) ;e
       :default)))
 
 (defn on-js-reload []
@@ -192,10 +202,11 @@
 (defn render []
   (.render renderer scene (@camera :object)))
 
-(defn animate []
+(defn animate [time]
   ;limit FPS:
-  (.setTimeout js/window #(.requestAnimationFrame js/window animate) (/ 1000 30))
+  (.setTimeout js/window #(.requestAnimationFrame js/window animate time) (/ 1000 30))
   ;(.requestAnimationFrame js/window animate)
+  (.update TWEEN time)
   (render))
 
-(animate)
+(animate 0)
