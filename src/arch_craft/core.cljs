@@ -6,31 +6,79 @@
 (enable-console-print!)
 
 (def app-element (.getElementById js/document "app"))
-(def aspect (/ (.-innerWidth js/window) (.-innerHeight js/window)))
-(def camera-distance 50)
-(def camera
-  (THREE.OrthographicCamera.
-    (* aspect (- camera-distance))
-    (* aspect camera-distance)
-    camera-distance
-    (- camera-distance)
-    1
-    1000))
-(def camera-target (THREE.Object3D.))
 
 (def scene (THREE.Scene.))
-;(.add scene camera)
 (def raycaster (THREE.Raycaster.))
+
+;conversion functions
+(defn deg->rad [deg]
+  (* deg (/ js/Math.PI 180.0)))
+
+(defn screen->space [vector x y]
+  (aset vector "x" (-> x
+                      (/ (.-innerWidth js/window))
+                      (* 2)
+                      (- 1)))
+  (aset vector "y" (-> y
+                      (/ (.-innerHeight js/window))
+                      (* -2)
+                      (+ 1))))
+
+; Camera stuff
+(def aspect (/ (.-innerWidth js/window) (.-innerHeight js/window)))
+(def camera-distance 50)
+(defn make-camera [aspect camera-distance]
+  (THREE.OrthographicCamera.
+            (* aspect (- camera-distance))
+            (* aspect camera-distance)
+            camera-distance
+            (- camera-distance)
+            1
+            1000))
+
+(defonce camera (atom {:object (make-camera aspect camera-distance), :target (THREE.Object3D.), :rotation 0}))
+
+(defn inc-rotation [camera deg]
+  (assoc camera :rotation
+    (let [rotation (:rotation camera)]
+      (-> rotation
+        (+ deg)
+        (mod 360)))))
+
+(defn setup-camera [scene camera]
+  (.set (.-position (@camera :object)) 100 100 100)
+  (swap! camera inc-rotation 45)
+  (.add (@camera :target) (@camera :object))
+  ;(.add (:target camera) (THREE.AxisHelper. 8))
+  (.add scene (@camera :target))
+  (.lookAt (@camera :object) (THREE.Vector3. 0 0 0)))
+
+; Camera movement
+(defn rotate-camera [camera deg]
+  (let [rotation (.-rotation (@camera :target))]
+    (swap! camera inc-rotation deg)
+    (aset rotation "y" (+ (deg->rad deg) (.-y rotation) ))))
+(defn rotate-camera-cw []
+  (rotate-camera camera -10))
+(defn rotate-camera-ccw []
+  (rotate-camera camera 10))
+
+(def pan-camera-damper 0.1)
+(defn pan-camera [delta-x delta-y] ;pan in pixel space
+  (let [position (.-position (@camera :target)) offset (THREE.Vector3.) y-axis (THREE.Vector3. 0 1 0)]
+    (.add position (-> offset
+                       (.set (- delta-x) 0 (- delta-y))
+                       (.multiplyScalar pan-camera-damper)
+                       (.applyAxisAngle y-axis (deg->rad (@camera :rotation)))))))
+
+
 (def mouse (THREE.Vector2.))
 
 (def renderer (THREE.WebGLRenderer. (js-obj "antialias" false)))
 (.setPixelRatio renderer (.-devicePixelRatio js/window))
 (.setSize renderer (.-innerWidth js/window) (.-innerHeight js/window))
 
-(.set (.-position camera) 100 100 100)
-(.add camera-target camera)
-(.add camera-target (THREE.AxisHelper. 8))
-(.add scene camera-target)
+(setup-camera scene camera)
 
 (def cursor (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial. (js-obj "transparent" true "opacity" 0.5))))
 
@@ -65,12 +113,9 @@
 (add-object (THREE.Mesh. planebuffer (THREE.MeshBasicMaterial. (js-obj "color" 0x333333))) :interactive true)
 (add-object cursor)
 (add-object (THREE.AmbientLight. 0x444444))
-;(.add scene (THREE.AxisHelper. 40))
 
 (.appendChild app-element (.-domElement renderer))
 
-(.lookAt camera (THREE.Vector3. 0 0 0))
-;(.lookAt camera camera-target)
 
 (defn snap-to-grid [mesh intersection]
   (if (.-face intersection) ;only snap to things that have faces.
@@ -82,19 +127,6 @@
         (.multiplyScalar 10)
         (.addScalar 5))))
 
-;conversion functions
-(defn deg->rad [deg]
-  (* deg (/ js/Math.PI 180.0)))
-
-(defn screen->space [vector x y]
-  (aset vector "x" (-> x
-                      (/ (.-innerWidth js/window))
-                      (* 2)
-                      (- 1)))
-  (aset vector "y" (-> y
-                      (/ (.-innerHeight js/window))
-                      (* -2)
-                      (+ 1))))
 ; Actions
 (defn insert-model [model]
   (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
@@ -103,34 +135,17 @@
         (add-object model)
         (snap-to-grid model (first intersections))))))
 
-; Camera movement
-(defn rotate-camera [camera deg]
-  (let [rotation (.-rotation camera)]
-    (aset rotation "y" (+ (deg->rad deg) (.-y rotation) ))))
-(defn rotate-camera-cw []
-  (rotate-camera camera-target 10))
-(defn rotate-camera-ccw []
-  (rotate-camera camera-target -10))
-
-(def pan-camera-damper 0.1)
-(defn pan-camera [delta-x delta-y] ;pan in pixel space
-  (let [position (.-position camera-target) offset (THREE.Vector3.) y-axis (THREE.Vector3. 0 1 0)]
-    (.add position (-> offset
-                       (.set delta-x 0 delta-y)
-                       (.multiplyScalar pan-camera-damper)
-                       (.applyAxisAngle y-axis (deg->rad 45))))))
-
 ; Event Handling
 (defn on-windowresize [event]
   (let [width (.-innerWidth js/window) height (.-innerHeight js/window)]
-    (aset camera "aspect" (/ width height))
-    (.updateProjectionMatrix camera)
+    (aset (@camera :object) "aspect" (/ width height))
+    (.updateProjectionMatrix (@camera :object))
     (.setSize renderer width height)))
 
 (defn on-mousemove [event]
   (.preventDefault event)
   (screen->space mouse (.-clientX event) (.-clientY event))
-  (.setFromCamera raycaster mouse camera)
+  (.setFromCamera raycaster mouse (@camera :object))
   (let [intersections (.intersectObjects raycaster (clj->js (@app-state :objects)))]
     (if-not (empty? intersections)
       (snap-to-grid cursor (first intersections)))))
@@ -144,7 +159,7 @@
   (.preventDefault event)
   (let [click-coord (THREE.Vector2.)]
     (screen->space click-coord (.-clientX event) (.-clientY event))
-    (.setFromCamera raycaster click-coord camera)
+    (.setFromCamera raycaster click-coord (@camera :object))
     (insert-model (THREE.Mesh. (THREE.BoxGeometry. 10 10 10) (THREE.MeshNormalMaterial.)))))
 
 (defn on-keyup [event]
@@ -175,7 +190,7 @@
 
 ; Rendering
 (defn render []
-  (.render renderer scene camera))
+  (.render renderer scene (@camera :object)))
 
 (defn animate []
   ;limit FPS:
